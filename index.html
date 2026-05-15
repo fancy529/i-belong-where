@@ -1,0 +1,1100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>我属于哪里</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    overflow: hidden;
+    font-family: 'Press Start 2P', 'Microsoft YaHei', sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+  }
+  #game-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    max-width: 1200px;
+    max-height: 800px;
+  }
+  canvas {
+    display: block;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    width: 100%;
+    height: 100%;
+  }
+  #overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.88);
+    z-index: 10;
+    padding: 20px;
+    overflow-y: auto;
+  }
+  #overlay.active { display: flex; }
+  #overlay .message {
+    color: #f0e6d3;
+    font-family: 'Press Start 2P', 'Microsoft YaHei', sans-serif;
+    font-size: 12px;
+    line-height: 2.4;
+    text-align: center;
+    max-width: 700px;
+    opacity: 0;
+    transition: opacity 0.8s;
+  }
+  #overlay .message.show { opacity: 1; }
+  #overlay .message .line { display: block; margin: 6px 0; }
+  #overlay .btns {
+    margin-top: 28px;
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  #overlay button {
+    font-family: 'Press Start 2P', 'Microsoft YaHei', sans-serif;
+    font-size: 10px;
+    padding: 12px 24px;
+    border: 3px solid #f0e6d3;
+    background: transparent;
+    color: #f0e6d3;
+    cursor: pointer;
+    image-rendering: pixelated;
+    transition: all 0.1s;
+    letter-spacing: 1px;
+  }
+  #overlay button:hover {
+    background: #f0e6d3;
+    color: #1a1a2e;
+  }
+  #overlay .easter-text {
+    color: #f1c40f;
+    font-family: 'Press Start 2P', 'Microsoft YaHei', sans-serif;
+    font-size: 10px;
+    line-height: 2.4;
+    text-align: center;
+    margin-top: 20px;
+    opacity: 0;
+    transition: opacity 0.8s;
+    max-width: 700px;
+  }
+  #overlay .easter-text.show { opacity: 1; }
+  #overlay .qrcode-area {
+    margin-top: 24px;
+    opacity: 0;
+    transition: opacity 0.8s;
+    text-align: center;
+  }
+  #overlay .qrcode-area.show { opacity: 1; }
+  #overlay .qrcode-area img {
+    width: 180px;
+    height: 180px;
+    border: 4px solid #f0e6d3;
+    image-rendering: pixelated;
+    background: #fff;
+    padding: 8px;
+  }
+  #overlay .qrcode-area p {
+    color: #aaa;
+    font-family: 'Press Start 2P', 'Microsoft YaHei', sans-serif;
+    font-size: 8px;
+    margin-top: 10px;
+  }
+  @media (max-width: 600px) {
+    #overlay .message { font-size: 8px; line-height: 2.2; }
+    #overlay button { font-size: 7px; padding: 10px 16px; }
+    #overlay .easter-text { font-size: 7px; }
+    #overlay .qrcode-area img { width: 140px; height: 140px; }
+    #overlay .qrcode-area p { font-size: 6px; }
+  }
+</style>
+</head>
+<body>
+<div id="game-container">
+  <canvas id="game"></canvas>
+  <div id="overlay">
+    <div class="message" id="win-message"></div>
+    <div class="btns">
+      <button id="btn-easter">...</button>
+      <button id="btn-replay">再来一次</button>
+    </div>
+    <div class="easter-text" id="easter-text"></div>
+    <div class="qrcode-area" id="qrcode-area">
+      <img id="qrcode-img" src="" alt="赞赏码">
+      <p>喜欢这个游戏？请我喝杯咖啡吧 ☕</p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  // ─────────────────── CONSTANTS ───────────────────
+  const W = 1200, H = 780;
+  const UI_H = 58;
+  const ROOM_X = 4, ROOM_Y = UI_H + 4;
+  const ROOM_W = W - 8, ROOM_H = H - UI_H - 8;
+  const WALL = 8;
+  const SPRITE_BASE = 16;
+  const SPRITE_SCALE = 3;
+  const SPRITE_S = SPRITE_BASE * SPRITE_SCALE;
+
+  // ─────────────────── DOM ───────────────────
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  canvas.width = W;
+  canvas.height = H;
+  ctx.imageSmoothingEnabled = false;
+
+  const overlay = document.getElementById('overlay');
+  const winMsg = document.getElementById('win-message');
+  const easterTxt = document.getElementById('easter-text');
+  const qrcodeArea = document.getElementById('qrcode-area');
+  const qrcodeImg = document.getElementById('qrcode-img');
+  const btnEaster = document.getElementById('btn-easter');
+  const btnReplay = document.getElementById('btn-replay');
+
+  // ─────────────────── AUDIO ───────────────────
+  let audioCtx = null;
+  function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, duration, type='square', vol=0.08) {
+    if (!audioCtx) return;
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const t = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    gain.gain.setValueAtTime(vol, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(t);
+    osc.stop(t + duration);
+  }
+  function sfxPickup() { beep(600, 0.08, 'square', 0.05); }
+  function sfxCorrect() { beep(800, 0.1, 'square', 0.06); setTimeout(() => beep(1200, 0.1, 'square', 0.06), 80); }
+  function sfxWrong() { beep(150, 0.15, 'triangle', 0.05); }
+  function sfxWin() {
+    [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.2, 'square', 0.06), i * 120));
+  }
+
+  // ─────────────────── BACKGROUND MUSIC ───────────────────
+  let musicOn = true;
+  let musicNodes = null;
+
+  function startMusic() {
+    if (!audioCtx) initAudio();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    if (musicNodes) return; // already playing
+
+    const ctx = audioCtx;
+    const masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(0.08, ctx.currentTime);
+    masterGain.connect(ctx.destination);
+
+    // Warm chord progression notes (low, gentle)
+    const chords = [
+      [261.6, 329.6, 392.0], // C major
+      [293.7, 369.9, 440.0], // D minor
+      [349.2, 440.0, 523.3], // F major
+      [329.6, 392.0, 493.9], // E minor
+      [261.6, 329.6, 392.0], // C major
+      [392.0, 493.9, 587.3], // G major
+      [349.2, 440.0, 523.3], // F major
+      [329.6, 392.0, 493.9], // E minor
+    ];
+
+    const noteDuration = 2.4; // seconds per chord
+
+    function playChord(index) {
+      if (!musicOn) { musicNodes = null; return; }
+      const chord = chords[index % chords.length];
+      const now = ctx.currentTime;
+
+      chord.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const noteGain = ctx.createGain();
+        osc.type = i === 0 ? 'triangle' : 'sine';
+        osc.frequency.setValueAtTime(freq, now);
+        noteGain.gain.setValueAtTime(0, now);
+        noteGain.gain.linearRampToValueAtTime(0.05, now + 0.4);
+        noteGain.gain.setValueAtTime(0.05, now + noteDuration - 0.4);
+        noteGain.gain.linearRampToValueAtTime(0, now + noteDuration);
+        osc.connect(noteGain);
+        noteGain.connect(masterGain);
+        osc.start(now);
+        osc.stop(now + noteDuration);
+      });
+
+      // Schedule next chord
+      musicNodes = setTimeout(() => playChord(index + 1), (noteDuration - 0.05) * 1000);
+    }
+
+    playChord(0);
+  }
+
+  function stopMusic() {
+    musicOn = false;
+    if (musicNodes) { clearTimeout(musicNodes); musicNodes = null; }
+  }
+
+  // ─────────────────── ROOM DATA ───────────────────
+  const ROOM_KEYS = ['bathroom', 'bedroom', 'closet', 'kitchen', 'living', 'study'];
+  const ROOM_INFO = {
+    bathroom: { name:'浴 室', emoji:'🛁', floor:'#d4dce8', floorGrid:'#c0cad8' },
+    bedroom:  { name:'卧 室', emoji:'🛏️', floor:'#e8d5c0', floorGrid:'#d8c5b0' },
+    closet:   { name:'衣帽间', emoji:'👗', floor:'#dcd0e4', floorGrid:'#ccc0d4' },
+    kitchen:  { name:'厨 房', emoji:'🍳', floor:'#f0e0c0', floorGrid:'#e0d0b0' },
+    living:   { name:'客 厅', emoji:'🛋️', floor:'#c8dcc8', floorGrid:'#b8ccb8' },
+    study:    { name:'书 房', emoji:'📚', floor:'#d6ccc0', floorGrid:'#c6bcb0' },
+  };
+
+  // Room scene furniture — coordinates relative to room interior
+  function S(x,y,w,h,c) { return {x,y,w,h,c}; }
+  const ROOM_SCENES = {
+    bathroom: [
+      // Bathtub (left side)
+      S(20,200,180,300,'#c8dce8'), S(20,200,10,300,'#b0c8d8'), S(20,490,180,10,'#b0c8d8'),
+      S(30,210,160,30,'#dce8f0'), // water surface
+      // Toilet (right side, lower)
+      S(800,350,80,100,'#e8e8e8'), S(800,340,80,20,'#ddd'),
+      S(820,330,40,20,'#ccc'), // tank
+      S(830,370,30,40,'#f0f0f0'), // bowl inner
+      // Sink + cabinet (top wall)
+      S(300,30,200,80,'#aaa'), S(320,50,50,35,'#ddd'), // left basin
+      S(430,50,50,35,'#ddd'), // right basin
+      // Mirror (above sink)
+      S(340,10,160,20,'#c0d8f0'), S(350,5,140,8,'#d0e4f8'),
+      // Towel rack (top right)
+      S(700,20,120,8,'#aaa'), S(710,28,8,30,'#1abc9c'), S(750,28,8,30,'#e67e22'),
+      // Bath mat (center)
+      S(350,450,200,100,'#e8dcc8'), S(360,460,180,80,'#f0e8d8'),
+    ],
+    bedroom: [
+      // Double bed (top-left)
+      S(20,20,480,320,'#c9a87c'), S(30,30,460,300,'#d4b896'),
+      // Pillows
+      S(40,30,180,70,'#eee'), S(300,30,180,70,'#eee'),
+      // Blanket/comforter (folded at foot)
+      S(40,300,440,30,'#8e6b4f'),
+      // Bed frame headboard
+      S(20,10,480,20,'#8b6914'),
+      // Nightstand (right side of bed)
+      S(520,50,90,90,'#a0845c'), S(535,40,60,15,'#b8956e'),
+      // Lamp on nightstand
+      S(555,60,20,25,'#f1c40f'), S(550,50,30,15,'#f39c12'),
+      // Wardrobe (right wall)
+      S(700,20,200,380,'#a0845c'), S(710,30,85,170,'#b8956e'), S(805,30,85,170,'#b8956e'),
+      S(710,210,85,180,'#b8956e'), S(805,210,85,180,'#b8956e'),
+      // Drawer handles
+      S(740,90,25,6,'#8b6914'), S(835,90,25,6,'#8b6914'),
+      S(740,280,25,6,'#8b6914'), S(835,280,25,6,'#8b6914'),
+      // Rug (center bottom)
+      S(250,380,350,200,'#c4956a'), S(270,400,310,160,'#d4a57a'),
+      // Dresser (bottom-left)
+      S(20,420,200,150,'#a0845c'), S(30,430,85,60,'#b8956e'), S(125,430,85,60,'#b8956e'),
+      S(30,500,85,60,'#b8956e'), S(125,500,85,60,'#b8956e'),
+    ],
+    closet: [
+      // Upper hanging rod
+      S(20,20,680,12,'#888'), S(20,8,680,14,'#9a7b5c'),
+      // Hangers on rod
+      S(60,20,4,60,'#aaa'), S(140,20,4,55,'#aaa'), S(220,20,4,65,'#aaa'),
+      S(300,20,4,50,'#aaa'), S(380,20,4,60,'#aaa'), S(460,20,4,55,'#aaa'),
+      S(540,20,4,65,'#aaa'), S(620,20,4,50,'#aaa'),
+      // Clothes hanging (colored rectangles under hangers)
+      S(50,80,24,200,'#e74c3c'), S(130,75,24,180,'#3498db'),
+      S(210,85,24,220,'#2ecc71'), S(290,70,24,160,'#9b59b6'),
+      S(370,80,24,210,'#f39c12'), S(450,75,24,190,'#1abc9c'),
+      S(530,85,24,230,'#e67e22'), S(610,70,24,170,'#34495e'),
+      // Shoe rack (bottom)
+      S(20,380,400,30,'#8b6914'), S(20,420,400,30,'#8b6914'), S(20,460,400,30,'#8b6914'),
+      // Shoes on racks
+      S(40,383,35,24,'#e74c3c'), S(90,383,35,24,'#e74c3c'),
+      S(160,383,40,24,'#2c3e50'), S(220,383,35,24,'#8e44ad'),
+      S(40,423,30,24,'#eee'), S(85,423,35,24,'#f39c12'),
+      S(140,423,40,24,'#2c3e50'), S(200,423,35,24,'#27ae60'),
+      // Drawer cabinet (right side)
+      S(750,20,200,280,'#a0845c'), S(760,30,180,55,'#b8956e'),
+      S(760,95,180,55,'#b8956e'), S(760,160,180,55,'#b8956e'),
+      S(760,225,180,55,'#b8956e'),
+      // Full-length mirror (bottom right)
+      S(800,340,50,180,'#c0d8f0'), S(805,345,40,170,'#dce8f8'),
+      // Storage boxes (bottom center)
+      S(450,380,120,90,'#e8d5a0'), S(460,390,100,70,'#f0e0b0'),
+      S(450,480,120,90,'#d5c8e0'), S(460,490,100,70,'#e0d5e8'),
+    ],
+    kitchen: [
+      // L-shaped counter (top + right)
+      S(20,20,600,160,'#999'), S(580,20,180,400,'#999'),
+      // Counter top surface
+      S(20,20,600,20,'#bbb'), S(580,20,180,20,'#bbb'),
+      // Sink (on top counter)
+      S(350,40,160,100,'#aaa'), S(370,55,120,55,'#ccc'),
+      // Stove (on top counter, right of sink)
+      S(530,40,70,100,'#555'), S(540,50,25,25,'#e74c3c'), S(575,50,25,25,'#e74c3c'),
+      S(540,85,25,25,'#e74c3c'), S(575,85,25,25,'#e74c3c'),
+      // Refrigerator (bottom right)
+      S(820,340,150,230,'#ddd'), S(825,345,140,110,'#eee'), S(825,460,140,105,'#eee'),
+      // Fridge handle
+      S(810,380,10,40,'#bbb'), S(810,480,10,40,'#bbb'),
+      // Dining table (left side, lower)
+      S(60,340,260,140,'#a0845c'), S(70,350,240,120,'#b8956e'),
+      // Chairs
+      S(40,320,80,30,'#8b6914'), S(260,320,80,30,'#8b6914'),
+      S(40,470,80,30,'#8b6914'), S(260,470,80,30,'#8b6914'),
+      // Trash can (corner)
+      S(760,20,50,70,'#666'), S(765,15,40,10,'#777'),
+      // Overhead cabinets (top wall, above counter)
+      S(30,180,180,60,'#b8956e'), S(230,180,180,60,'#b8956e'),
+      S(30,185,170,50,'#c9a87c'), S(240,185,160,50,'#c9a87c'),
+    ],
+    living: [
+      // TV stand + TV (top wall)
+      S(350,20,400,80,'#555'), S(380,30,340,60,'#2c3e50'),
+      S(390,35,320,50,'#3498db'),
+      // L-shaped sofa (bottom + left)
+      S(20,250,320,340,'#8b7355'), S(60,250,240,310,'#9a8265'),
+      // Sofa cushions
+      S(80,270,100,90,'#a0896e'), S(200,270,100,90,'#a0896e'),
+      S(80,380,100,90,'#a0896e'), S(200,380,100,90,'#a0896e'),
+      // Sofa arm (vertical part of L)
+      S(340,250,80,340,'#8b7355'), S(350,260,60,320,'#9a8265'),
+      // Coffee table (center)
+      S(380,340,250,120,'#a0845c'), S(390,350,230,100,'#b8956e'),
+      // TV remote on table
+      S(420,385,12,30,'#2c3e50'),
+      // Rug (under table area)
+      S(370,300,280,200,'#c47050'), S(390,320,240,160,'#d48060'),
+      // Floor lamp (top-left corner)
+      S(70,20,30,80,'#555'), S(80,5,10,20,'#555'),
+      S(75,20,20,8,'#f1c40f'), S(65,10,40,15,'#f39c12'),
+      // Large plant (top-right corner)
+      S(850,40,60,80,'#8b4513'), S(840,10,80,40,'#27ae60'),
+      S(850,5,60,20,'#2ecc71'), S(860,20,40,15,'#27ae60'),
+      // Picture frames on wall
+      S(140,20,80,60,'#8b6914'), S(148,28,64,44,'#f5deb3'),
+      S(155,35,50,30,'#87ceeb'),
+      S(250,30,60,50,'#8b6914'), S(256,36,48,38,'#f5deb3'),
+    ],
+    study: [
+      // Bookshelf (left wall, full height)
+      S(20,20,200,520,'#8b6914'), S(30,30,180,60,'#a0845c'),
+      S(30,100,180,60,'#a0845c'), S(30,170,180,60,'#a0845c'),
+      S(30,240,180,60,'#a0845c'), S(30,310,180,60,'#a0845c'),
+      S(30,380,180,60,'#a0845c'), S(30,450,180,60,'#a0845c'),
+      // Books (colored blocks in shelves)
+      S(35,35,12,50,'#e74c3c'), S(50,38,10,47,'#3498db'), S(63,33,8,52,'#2ecc71'),
+      S(75,36,14,49,'#f39c12'), S(92,34,10,51,'#9b59b6'),
+      S(35,105,15,50,'#1abc9c'), S(53,108,9,47,'#e67e22'), S(65,103,12,52,'#c0392b'),
+      S(35,175,10,50,'#34495e'), S(48,178,14,47,'#f1c40f'),
+      S(35,245,12,50,'#e74c3c'), S(50,248,8,47,'#2980b9'), S(62,243,15,52,'#27ae60'),
+      // Desk (right side)
+      S(380,300,400,120,'#a0845c'), S(390,310,380,100,'#b8956e'),
+      // Laptop on desk
+      S(440,280,120,20,'#7f8c8d'), S(460,250,100,35,'#2c3e50'),
+      S(465,255,90,25,'#3498db'),
+      // Chair at desk
+      S(600,420,100,60,'#555'), S(610,380,80,50,'#666'),
+      S(620,340,60,50,'#777'),
+      // Floor lamp (corner)
+      S(850,250,20,120,'#555'), S(855,240,10,15,'#555'),
+      S(840,255,40,12,'#f1c40f'), S(830,245,60,18,'#f39c12'),
+      // Armchair / reading nook (bottom-left)
+      S(60,440,160,140,'#8b5e3c'), S(80,460,120,100,'#a0724a'),
+      S(100,420,60,40,'#a0724a'), // backrest
+      // Small side table
+      S(250,470,60,60,'#a0845c'), S(260,450,40,25,'#b8956e'),
+      // Cup on side table
+      S(270,440,18,15,'#e74c3c'),
+    ],
+  };
+
+  // ─────────────────── SPRITE BUILDER ───────────────────
+  function buildSprite(shapes) {
+    const c = document.createElement('canvas');
+    c.width = c.height = SPRITE_BASE;
+    const cx = c.getContext('2d');
+    cx.imageSmoothingEnabled = false;
+    for (const s of shapes) {
+      cx.fillStyle = s.c;
+      cx.fillRect(s.x, s.y, s.w, s.h);
+    }
+    return c;
+  }
+
+  const sprites = {
+    pan: buildSprite([{x:3,y:5,w:10,h:8,c:'#555'},{x:4,y:4,w:8,h:2,c:'#777'},{x:13,y:7,w:3,h:2,c:'#8b4513'}]),
+    pot: buildSprite([{x:3,y:3,w:10,h:10,c:'#666'},{x:4,y:2,w:8,h:2,c:'#888'},{x:1,y:5,w:2,h:4,c:'#888'},{x:13,y:5,w:2,h:4,c:'#888'}]),
+    knife: buildSprite([{x:8,y:2,w:2,h:7,c:'#ccc'},{x:7,y:9,w:4,h:5,c:'#8b4513'},{x:9,y:2,w:2,h:6,c:'#eee'}]),
+    plate: buildSprite([{x:2,y:6,w:12,h:3,c:'#eee'},{x:3,y:5,w:10,h:1,c:'#ddd'},{x:3,y:9,w:10,h:1,c:'#ddd'},{x:4,y:4,w:8,h:1,c:'#ccc'},{x:4,y:10,w:6,h:1,c:'#ccc'}]),
+    cup: buildSprite([{x:4,y:3,w:8,h:10,c:'#e74c3c'},{x:4,y:2,w:8,h:2,c:'#c0392b'},{x:3,y:2,w:2,h:4,c:'#c0392b'},{x:11,y:2,w:2,h:4,c:'#c0392b'}]),
+    tv: buildSprite([{x:1,y:3,w:14,h:9,c:'#2c3e50'},{x:3,y:4,w:10,h:7,c:'#3498db'},{x:5,y:12,w:6,h:2,c:'#555'},{x:3,y:14,w:10,h:2,c:'#333'}]),
+    remote: buildSprite([{x:5,y:3,w:6,h:11,c:'#2c3e50'},{x:6,y:4,w:4,h:1,c:'#e74c3c'},{x:6,y:6,w:4,h:1,c:'#555'},{x:6,y:8,w:4,h:1,c:'#555'},{x:6,y:10,w:4,h:1,c:'#555'}]),
+    cushion: buildSprite([{x:2,y:3,w:12,h:10,c:'#e67e22'},{x:3,y:4,w:10,h:8,c:'#f39c12'},{x:6,y:6,w:4,h:4,c:'#e67e22'}]),
+    plant: buildSprite([{x:5,y:9,w:6,h:6,c:'#8b4513'},{x:4,y:8,w:8,h:2,c:'#a0522d'},{x:6,y:2,w:4,h:7,c:'#27ae60'},{x:4,y:3,w:3,h:5,c:'#2ecc71'},{x:9,y:4,w:3,h:4,c:'#2ecc71'},{x:7,y:1,w:2,h:3,c:'#2ecc71'}]),
+    frame: buildSprite([{x:2,y:2,w:12,h:12,c:'#8b4513'},{x:4,y:4,w:8,h:8,c:'#f5deb3'},{x:6,y:6,w:3,h:3,c:'#87ceeb'},{x:10,y:5,w:1,h:5,c:'#228b22'}]),
+    pillow: buildSprite([{x:2,y:4,w:12,h:7,c:'#eee'},{x:1,y:5,w:2,h:5,c:'#ddd'},{x:13,y:5,w:2,h:5,c:'#ddd'},{x:4,y:5,w:8,h:5,c:'#fff'}]),
+    blanket: buildSprite([{x:1,y:3,w:14,h:9,c:'#3498db'},{x:1,y:2,w:14,h:2,c:'#2980b9'},{x:2,y:4,w:5,h:7,c:'#5dade2'},{x:8,y:4,w:5,h:7,c:'#5dade2'},{x:2,y:12,w:12,h:1,c:'#2980b9'}]),
+    clock: buildSprite([{x:4,y:2,w:8,h:8,c:'#f39c12'},{x:3,y:1,w:10,h:2,c:'#e67e22'},{x:5,y:0,w:2,h:2,c:'#e67e22'},{x:9,y:0,w:2,h:2,c:'#e67e22'},{x:3,y:3,w:10,h:6,c:'#fff'},{x:7,y:4,w:1,h:3,c:'#333'},{x:8,y:6,w:2,h:1,c:'#333'}]),
+    slippers: buildSprite([{x:1,y:8,w:5,h:5,c:'#e74c3c'},{x:2,y:7,w:4,h:2,c:'#c0392b'},{x:2,y:12,w:3,h:1,c:'#c0392b'},{x:9,y:8,w:5,h:5,c:'#e74c3c'},{x:10,y:7,w:4,h:2,c:'#c0392b'},{x:10,y:12,w:3,h:1,c:'#c0392b'}]),
+    teddy: buildSprite([{x:6,y:1,w:4,h:4,c:'#8b4513'},{x:7,y:2,w:1,h:1,c:'#333'},{x:8,y:2,w:1,h:1,c:'#333'},{x:7,y:5,w:2,h:7,c:'#a0522d'},{x:3,y:6,w:3,h:2,c:'#a0522d'},{x:10,y:6,w:3,h:2,c:'#a0522d'},{x:4,y:8,w:2,h:4,c:'#a0522d'},{x:10,y:8,w:2,h:4,c:'#a0522d'}]),
+    toothbrush: buildSprite([{x:7,y:2,w:2,h:12,c:'#eee'},{x:6,y:2,w:4,h:3,c:'#3498db'},{x:7,y:5,w:2,h:4,c:'#3498db'}]),
+    towel: buildSprite([{x:2,y:3,w:12,h:8,c:'#1abc9c'},{x:2,y:2,w:12,h:2,c:'#16a085'},{x:3,y:4,w:5,h:6,c:'#48c9b0'},{x:9,y:4,w:4,h:6,c:'#48c9b0'},{x:2,y:11,w:12,h:1,c:'#16a085'}]),
+    soap: buildSprite([{x:4,y:5,w:8,h:5,c:'#9b59b6'},{x:3,y:6,w:2,h:3,c:'#8e44ad'},{x:12,y:6,w:2,h:3,c:'#8e44ad'},{x:5,y:4,w:6,h:2,c:'#af7ac5'}]),
+    toilet_paper: buildSprite([{x:5,y:2,w:6,h:12,c:'#eee'},{x:4,y:2,w:2,h:12,c:'#ddd'},{x:11,y:2,w:2,h:12,c:'#ddd'},{x:5,y:1,w:6,h:2,c:'#ddd'}]),
+    shampoo: buildSprite([{x:5,y:4,w:6,h:9,c:'#e67e22'},{x:5,y:2,w:6,h:3,c:'#d35400'},{x:6,y:1,w:4,h:2,c:'#3498db'},{x:7,y:13,w:2,h:1,c:'#d35400'}]),
+    book: buildSprite([{x:3,y:5,w:10,h:8,c:'#2980b9'},{x:4,y:4,w:8,h:10,c:'#3498db'},{x:1,y:5,w:3,h:8,c:'#1a5276'},{x:4,y:6,w:8,h:1,c:'#fff'},{x:4,y:8,w:8,h:1,c:'#fff'},{x:4,y:10,w:8,h:1,c:'#fff'}]),
+    laptop: buildSprite([{x:2,y:7,w:12,h:2,c:'#7f8c8d'},{x:1,y:8,w:14,h:6,c:'#95a5a6'},{x:3,y:2,w:10,h:6,c:'#2c3e50'},{x:4,y:3,w:8,h:4,c:'#3498db'}]),
+    pen: buildSprite([{x:7,y:1,w:2,h:11,c:'#e74c3c'},{x:7,y:10,w:2,h:3,c:'#f1c40f'},{x:8,y:1,w:1,h:10,c:'#c0392b'},{x:6,y:12,w:4,h:2,c:'#333'}]),
+    lamp: buildSprite([{x:6,y:10,w:4,h:4,c:'#555'},{x:7,y:7,w:2,h:4,c:'#777'},{x:2,y:3,w:12,h:5,c:'#f1c40f'},{x:3,y:2,w:10,h:2,c:'#f39c12'},{x:2,y:5,w:12,h:1,c:'#f39c12'}]),
+    glasses: buildSprite([{x:3,y:5,w:4,h:4,c:'#333'},{x:9,y:5,w:4,h:4,c:'#333'},{x:2,y:4,w:6,h:1,c:'#555'},{x:8,y:4,w:6,h:1,c:'#555'},{x:2,y:6,w:2,h:1,c:'#555'},{x:12,y:6,w:2,h:1,c:'#555'},{x:7,y:6,w:2,h:1,c:'#555'}]),
+    dress: buildSprite([{x:5,y:1,w:6,h:3,c:'#e74c3c'},{x:4,y:3,w:8,h:5,c:'#c0392b'},{x:3,y:8,w:10,h:6,c:'#e74c3c'},{x:6,y:10,w:4,h:4,c:'#c0392b'}]),
+    heels: buildSprite([{x:7,y:3,w:4,h:5,c:'#8e44ad'},{x:7,y:1,w:4,h:3,c:'#9b59b6'},{x:6,y:8,w:6,h:2,c:'#7d3c98'},{x:5,y:10,w:2,h:4,c:'#7d3c98'}]),
+    coat: buildSprite([{x:4,y:2,w:8,h:5,c:'#2c3e50'},{x:3,y:6,w:4,h:7,c:'#34495e'},{x:9,y:6,w:4,h:7,c:'#34495e'},{x:5,y:2,w:2,h:4,c:'#e74c3c'}]),
+    hanger: buildSprite([{x:3,y:4,w:10,h:1,c:'#8b4513'},{x:4,y:1,w:8,h:4,c:'#a0522d'},{x:2,y:4,w:2,h:1,c:'#8b4513'},{x:12,y:4,w:2,h:1,c:'#8b4513'},{x:7,y:0,w:2,h:2,c:'#8b4513'}]),
+    hat: buildSprite([{x:2,y:6,w:12,h:2,c:'#2c3e50'},{x:1,y:8,w:14,h:5,c:'#34495e'},{x:3,y:3,w:10,h:4,c:'#2c3e50'},{x:5,y:2,w:6,h:2,c:'#34495e'}]),
+  };
+
+  // ─────────────────── ITEMS DATA ───────────────────
+  const ITEM_DEFS = [
+    { id:'pan', name:'平底锅', home:'kitchen' },
+    { id:'pot', name:'汤锅', home:'kitchen' },
+    { id:'knife', name:'菜刀', home:'kitchen' },
+    { id:'plate', name:'盘子', home:'kitchen' },
+    { id:'cup', name:'杯子', home:'kitchen' },
+    { id:'tv', name:'电视', home:'living' },
+    { id:'remote', name:'遥控器', home:'living' },
+    { id:'cushion', name:'靠垫', home:'living' },
+    { id:'plant', name:'盆栽', home:'living' },
+    { id:'frame', name:'相框', home:'living' },
+    { id:'pillow', name:'枕头', home:'bedroom' },
+    { id:'blanket', name:'被子', home:'bedroom' },
+    { id:'clock', name:'闹钟', home:'bedroom' },
+    { id:'slippers', name:'拖鞋', home:'bedroom' },
+    { id:'teddy', name:'泰迪熊', home:'bedroom' },
+    { id:'toothbrush', name:'牙刷', home:'bathroom' },
+    { id:'towel', name:'毛巾', home:'bathroom' },
+    { id:'soap', name:'肥皂', home:'bathroom' },
+    { id:'toilet_paper', name:'卷纸', home:'bathroom' },
+    { id:'shampoo', name:'洗发水', home:'bathroom' },
+    { id:'book', name:'书本', home:'study' },
+    { id:'laptop', name:'笔记本', home:'study' },
+    { id:'pen', name:'笔', home:'study' },
+    { id:'lamp', name:'台灯', home:'study' },
+    { id:'glasses', name:'眼镜', home:'study' },
+    { id:'dress', name:'连衣裙', home:'closet' },
+    { id:'heels', name:'高跟鞋', home:'closet' },
+    { id:'coat', name:'外套', home:'closet' },
+    { id:'hanger', name:'衣架', home:'closet' },
+    { id:'hat', name:'帽子', home:'closet' },
+  ];
+
+  // ─────────────────── GAME STATE ───────────────────
+  let items = [];
+  let currentRoom = 'kitchen'; // starting room
+  let heldItem = null;        // item currently being carried
+  let heldOrigRoom = null;    // room item was picked up from
+  let heldOrigX = 0, heldOrigY = 0; // original position before pickup
+  let mouseX = 0, mouseY = 0;
+  let hoveredItem = null;
+  let feedbacks = [];
+  let gameComplete = false;
+  let easterRevealed = false;
+  let winLinesShown = 0;
+  let winAnimTimer = null;
+  let tabPulse = 0;
+
+  function initGame() {
+    gameComplete = false;
+    easterRevealed = false;
+    winLinesShown = 0;
+    feedbacks = [];
+    heldItem = null;
+    hoveredItem = null;
+    currentRoom = 'kitchen';
+    overlay.classList.remove('active');
+    winMsg.classList.remove('show');
+    winMsg.innerHTML = '';
+    easterTxt.classList.remove('show');
+    easterTxt.innerHTML = '';
+    qrcodeArea.classList.remove('show');
+    btnEaster.style.display = 'inline-block';
+    btnEaster.textContent = '...';
+    if (winAnimTimer) { clearTimeout(winAnimTimer); winAnimTimer = null; }
+
+    // Assign each item to a random NON-home room
+    items = ITEM_DEFS.map(def => ({
+      ...def,
+      sprite: sprites[def.id],
+      currentRoom: null,
+      x: 0, y: 0,
+    }));
+    items.forEach(it => {
+      const otherRooms = ROOM_KEYS.filter(r => r !== it.home);
+      it.currentRoom = otherRooms[Math.floor(Math.random() * otherRooms.length)];
+    });
+    ROOM_KEYS.forEach(rk => positionItemsInRoom(rk));
+  }
+
+  function positionItemsInRoom(roomKey) {
+    const roomItems = items.filter(it => it.currentRoom === roomKey && it !== heldItem);
+    if (roomItems.length === 0) return;
+    const padding = 20;
+    const itemW = SPRITE_S + 28;
+    const itemH = SPRITE_S + 30;
+    const cols = Math.max(1, Math.floor((ROOM_W - padding * 2 - WALL * 2) / itemW));
+    const cellW = (ROOM_W - padding * 2 - WALL * 2) / cols;
+    const roomLeft = ROOM_X + WALL + padding;
+    const roomTop = ROOM_Y + WALL + padding;
+
+    roomItems.forEach((it, idx) => {
+      const c = idx % cols;
+      const r = Math.floor(idx / cols);
+      it.x = roomLeft + c * cellW + (cellW - SPRITE_S) / 2 + (Math.random() - 0.5) * 12;
+      it.y = roomTop + r * itemH + 10 + (Math.random() - 0.5) * 8;
+    });
+  }
+
+  function correctCount() {
+    return items.filter(it => it.currentRoom === it.home).length;
+  }
+
+  // ─────────────────── RENDERING ───────────────────
+  function drawTabBar() {
+    const tabW = Math.floor((W - 20) / 6);
+    const tabH = UI_H - 8;
+    const tabY = 4;
+
+    ROOM_KEYS.forEach((rk, i) => {
+      const tx = 10 + i * tabW;
+      const isActive = rk === currentRoom;
+      const info = ROOM_INFO[rk];
+
+      // Tab background
+      ctx.fillStyle = isActive ? '#3d3050' : '#1a1a2e';
+      ctx.fillRect(tx, tabY, tabW - 2, tabH);
+
+      // Border
+      ctx.strokeStyle = isActive ? '#f0e6d3' : '#555';
+      ctx.lineWidth = isActive ? 3 : 2;
+      ctx.strokeRect(tx + 1, tabY + 1, tabW - 4, tabH - 2);
+
+      // Pulsing border when holding item (any room is a valid target)
+      if (heldItem && tabPulse % 40 < 20) {
+        ctx.strokeStyle = '#f1c40f';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(tx - 1, tabY - 1, tabW, tabH + 2);
+      }
+
+      // Room name
+      ctx.fillStyle = isActive ? '#f0e6d3' : '#999';
+      ctx.font = '12px "Press Start 2P", "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(info.name, tx + (tabW - 2) / 2, tabY + 24);
+      ctx.textAlign = 'start';
+
+      // Item count badge
+      const count = items.filter(it => it.currentRoom === rk).length;
+      ctx.fillStyle = '#555';
+      ctx.font = '7px "Press Start 2P", "Microsoft YaHei", sans-serif';
+      ctx.fillText(count + '件', tx + (tabW - 2) / 2, tabY + 40);
+    });
+  }
+
+  function drawRoomScene() {
+    const info = ROOM_INFO[currentRoom];
+    const ix = ROOM_X, iy = ROOM_Y, iw = ROOM_W, ih = ROOM_H;
+
+    // Floor
+    ctx.fillStyle = info.floor;
+    ctx.fillRect(ix, iy, iw, ih);
+
+    // Floor grid texture
+    ctx.fillStyle = info.floorGrid;
+    for (let gx = ix; gx < ix + iw; gx += 24) {
+      for (let gy = iy; gy < iy + ih; gy += 24) {
+        ctx.fillRect(gx, gy, 2, 2);
+      }
+    }
+
+    // Draw furniture
+    const scene = ROOM_SCENES[currentRoom] || [];
+    scene.forEach(s => {
+      const sx = ix + WALL + s.x;
+      const sy = iy + WALL + s.y;
+      ctx.fillStyle = s.c;
+      ctx.fillRect(sx, sy, s.w, s.h);
+      // Subtle shadow/depth
+      ctx.fillStyle = 'rgba(0,0,0,0.1)';
+      ctx.fillRect(sx + 2, sy + 2, s.w, s.h);
+      ctx.fillStyle = s.c;
+      ctx.fillRect(sx, sy, s.w, s.h);
+    });
+
+    // Walls (drawn last so they overlay furniture edges)
+    ctx.fillStyle = '#4a3728';
+    ctx.fillRect(ix, iy, iw, WALL);               // top
+    ctx.fillRect(ix, iy + ih - WALL, iw, WALL);   // bottom
+    ctx.fillRect(ix, iy, WALL, ih);               // left
+    ctx.fillRect(ix + iw - WALL, iy, WALL, ih);   // right
+    // Wall highlights
+    ctx.fillStyle = '#5d4a37';
+    ctx.fillRect(ix, iy, WALL, WALL);
+    ctx.fillRect(ix + iw - WALL, iy, WALL, WALL);
+
+    // Room label (subtle, bottom-right)
+    ctx.fillStyle = 'rgba(0,0,0,0.1)';
+    ctx.font = 'bold 24px "Press Start 2P", "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(info.name, ix + iw - WALL - 16, iy + ih - WALL - 16);
+    ctx.textAlign = 'start';
+  }
+
+  function drawItem(it, x, y, alpha = 1) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(x + 2, y + SPRITE_S, SPRITE_S, 3);
+
+    // Sprite
+    ctx.drawImage(it.sprite, x, y, SPRITE_S, SPRITE_S);
+
+    // Label
+    ctx.fillStyle = '#333';
+    ctx.font = '9px "Press Start 2P", "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(it.name, x + SPRITE_S / 2, y + SPRITE_S + 14);
+    ctx.textAlign = 'start';
+
+    ctx.restore();
+  }
+
+  function render() {
+    // Clear
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw room scene
+    drawRoomScene();
+
+    // Draw items in current room (except held item)
+    items.forEach(it => {
+      if (it.currentRoom !== currentRoom || it === heldItem) return;
+      const isHov = it === hoveredItem;
+      if (isHov) {
+        ctx.fillStyle = 'rgba(255,255,255,0.25)';
+        ctx.fillRect(it.x - 3, it.y - 3, SPRITE_S + 6, SPRITE_S + 22);
+      }
+      drawItem(it, it.x, it.y);
+    });
+
+    // Feedback flashes
+    feedbacks = feedbacks.filter(f => f.timer > 0);
+    if (feedbacks.length > 0 && feedbacks[0].room === currentRoom) {
+      feedbacks.forEach(f => {
+        ctx.fillStyle = f.color;
+        ctx.globalAlpha = Math.min(0.35, f.timer / 30);
+        ctx.fillRect(ROOM_X + WALL, ROOM_Y + WALL, ROOM_W - WALL * 2, ROOM_H - WALL * 2);
+        ctx.globalAlpha = 1;
+        f.timer--;
+      });
+    }
+
+    // Held item (follows cursor)
+    if (heldItem) {
+      const hx = mouseX - SPRITE_S / 2;
+      const hy = mouseY - SPRITE_S / 2 - 10;
+      // Glow
+      ctx.fillStyle = 'rgba(255,255,200,0.2)';
+      ctx.fillRect(hx - 6, hy - 6, SPRITE_S + 12, SPRITE_S + 26);
+      // Item
+      drawItem(heldItem, hx, hy, 0.9);
+      // White border
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(hx - 3, hy - 3, SPRITE_S + 6, SPRITE_S + 6);
+
+      // "Carrying" label
+      ctx.fillStyle = '#f1c40f';
+      ctx.font = '8px "Press Start 2P", "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('手持: ' + heldItem.name, mouseX, hy - 12);
+      ctx.textAlign = 'start';
+    }
+
+    // Tab bar (drawn on top)
+    drawTabBar();
+
+    // Divider line
+    ctx.fillStyle = '#2c2c44';
+    ctx.fillRect(0, UI_H, W, 2);
+
+    // Title text
+    ctx.fillStyle = '#f0e6d3';
+    ctx.font = '14px "Press Start 2P", "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('🏠 我属于哪里', 14, UI_H - 18);
+    ctx.textAlign = 'start';
+
+    // Progress indicator (bottom-left corner)
+    const correct = correctCount();
+    const total = items.length;
+    const barX = 12, barY = H - 28, barW = 260, barH = 16;
+    // Dark background with border
+    ctx.fillStyle = '#111';
+    ctx.fillRect(barX - 2, barY - 2, barW + 4, barH + 4);
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(barX - 2, barY - 2, barW + 4, barH + 4);
+    // Bar background
+    ctx.fillStyle = '#2a2a2a';
+    ctx.fillRect(barX, barY, barW, barH);
+    // Filled portion
+    const pw = Math.floor((correct / total) * barW);
+    if (pw > 0) {
+      const grad = ctx.createLinearGradient(barX, barY, barX + barW, barY);
+      grad.addColorStop(0, '#27ae60');
+      grad.addColorStop(1, correct === total ? '#2ecc71' : '#f1c40f');
+      ctx.fillStyle = grad;
+      ctx.fillRect(barX, barY, pw, barH);
+    }
+    // Pixel segments
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    const segW = Math.floor(barW / total);
+    for (let sx = barX + segW; sx < barX + barW; sx += segW) {
+      ctx.fillRect(sx, barY, 2, barH);
+    }
+    // Count text (left of bar)
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 10px "Press Start 2P", "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`已归位 ${correct} / ${total}`, barX, barY - 6);
+    ctx.textAlign = 'start';
+
+    // Music toggle (bottom-right)
+    const musicX = W - 28, musicY = H - 28;
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(musicX - 2, musicY - 2, 24, 24);
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(musicX - 2, musicY - 2, 24, 24);
+    ctx.fillStyle = musicOn ? '#f1c40f' : '#666';
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(musicOn ? '♫' : '♪', musicX + 10, musicY + 16);
+    ctx.textAlign = 'start';
+
+    // Continue loop if needed
+    const needLoop = heldItem || feedbacks.length > 0 || tabPulse > 0;
+    if (needLoop) {
+      tabPulse = (tabPulse + 1) % 80;
+      requestAnimationFrame(render);
+    }
+  }
+
+  // ─────────────────── INPUT ───────────────────
+  function getCanvasPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = W / rect.width;
+    const scaleY = H / rect.height;
+    let cx, cy;
+    if (e.changedTouches && e.changedTouches.length > 0) {
+      cx = e.changedTouches[0].clientX; cy = e.changedTouches[0].clientY;
+    } else if (e.touches && e.touches.length > 0) {
+      cx = e.touches[0].clientX; cy = e.touches[0].clientY;
+    } else {
+      cx = e.clientX; cy = e.clientY;
+    }
+    return { x: (cx - rect.left) * scaleX, y: (cy - rect.top) * scaleY };
+  }
+
+  function findTabAt(cx, cy) {
+    if (cy < 4 || cy > UI_H - 4) return null;
+    const tabW = Math.floor((W - 20) / 6);
+    const idx = Math.floor((cx - 10) / tabW);
+    if (idx >= 0 && idx < 6 && cx >= 10 + idx * tabW && cx < 10 + (idx + 1) * tabW) {
+      return ROOM_KEYS[idx];
+    }
+    return null;
+  }
+
+  function findItemInRoom(cx, cy) {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i];
+      if (it.currentRoom !== currentRoom || it === heldItem) continue;
+      if (cx >= it.x && cx <= it.x + SPRITE_S && cy >= it.y && cy <= it.y + SPRITE_S + 18) {
+        return it;
+      }
+    }
+    return null;
+  }
+
+  function isInRoom(cx, cy) {
+    return cx >= ROOM_X && cx <= ROOM_X + ROOM_W && cy >= ROOM_Y && cy <= ROOM_Y + ROOM_H;
+  }
+
+  function onDown(e) {
+    if (gameComplete) return;
+    initAudio();
+    startMusic(); // start bg music on first interaction
+    e.preventDefault();
+    const pos = getCanvasPos(e);
+    mouseX = pos.x; mouseY = pos.y;
+
+    // Check music toggle
+    if (pos.x > W - 30 && pos.x < W - 6 && pos.y > H - 30 && pos.y < H - 6) {
+      musicOn = !musicOn;
+      if (musicOn) { musicNodes = null; startMusic(); } else { stopMusic(); }
+      requestAnimationFrame(render);
+      return;
+    }
+
+    // Check tab click first
+    const tabKey = findTabAt(pos.x, pos.y);
+    if (tabKey !== null) {
+      if (heldItem) {
+        // Switching rooms while carrying item
+        currentRoom = tabKey;
+        sfxPickup();
+        requestAnimationFrame(render);
+        return;
+      }
+      currentRoom = tabKey;
+      hoveredItem = null;
+      requestAnimationFrame(render);
+      return;
+    }
+
+    // Not on tab — check if in room
+    if (!isInRoom(pos.x, pos.y)) return;
+
+    if (heldItem) {
+      // Place held item at drop position
+      heldItem.currentRoom = currentRoom;
+      heldItem.x = pos.x - SPRITE_S / 2;
+      heldItem.y = pos.y - SPRITE_S / 2 - 10;
+
+      // Clamp to room bounds
+      const minX = ROOM_X + WALL + 4;
+      const minY = ROOM_Y + WALL + 4;
+      const maxX = ROOM_X + ROOM_W - WALL - SPRITE_S - 4;
+      const maxY = ROOM_Y + ROOM_H - WALL - SPRITE_S - 20;
+      heldItem.x = Math.max(minX, Math.min(maxX, heldItem.x));
+      heldItem.y = Math.max(minY, Math.min(maxY, heldItem.y));
+
+      if (currentRoom === heldItem.home) {
+        feedbacks.push({ room: currentRoom, color: '#2ecc71', timer: 25 });
+        sfxCorrect();
+      } else {
+        feedbacks.push({ room: currentRoom, color: '#e74c3c', timer: 15 });
+        sfxWrong();
+      }
+      heldItem = null;
+      checkWin();
+      requestAnimationFrame(render);
+      return;
+    }
+
+    // Try to pick up an item
+    const item = findItemInRoom(pos.x, pos.y);
+    if (item) {
+      heldItem = item;
+      heldOrigRoom = item.currentRoom;
+      heldOrigX = item.x;
+      heldOrigY = item.y;
+      sfxPickup();
+      requestAnimationFrame(render);
+    }
+  }
+
+  function onMove(e) {
+    e.preventDefault();
+    const pos = getCanvasPos(e);
+    mouseX = pos.x; mouseY = pos.y;
+
+    if (heldItem) {
+      requestAnimationFrame(render);
+    } else if (!gameComplete && isInRoom(pos.x, pos.y)) {
+      const item = findItemInRoom(pos.x, pos.y);
+      if (item !== hoveredItem) {
+        hoveredItem = item;
+        requestAnimationFrame(render);
+      }
+    }
+  }
+
+  function onUp(e) {
+    // Not used for placement (we use click-to-place)
+  }
+
+  function onContextMenu(e) {
+    // Right-click to cancel carry
+    if (heldItem) {
+      e.preventDefault();
+      heldItem.x = heldOrigX;
+      heldItem.y = heldOrigY;
+      heldItem.currentRoom = heldOrigRoom;
+      heldItem = null;
+      requestAnimationFrame(render);
+    }
+  }
+
+  function onKeyDown(e) {
+    if (e.key === 'Escape' && heldItem) {
+      heldItem.x = heldOrigX;
+      heldItem.y = heldOrigY;
+      heldItem.currentRoom = heldOrigRoom;
+      heldItem = null;
+      requestAnimationFrame(render);
+    }
+  }
+
+  function checkWin() {
+    const allCorrect = items.every(it => it.currentRoom === it.home);
+    if (allCorrect) {
+      gameComplete = true;
+      sfxWin();
+      setTimeout(showWinScreen, 500);
+    }
+  }
+
+  // ─────────────────── WIN SCREEN ───────────────────
+  const WIN_LINES = [
+    '所有物品都回到了',
+    '"该在"的位置。',
+    '',
+    '但它们并没有',
+    '改变自己。',
+    '',
+    '你也是。',
+    '不必扭曲自己去融入',
+    '某个地方。',
+    '',
+    '吾心安处即是家。',
+  ];
+
+  const EASTER_LINES = [
+    '其实，谁规定',
+    '马桶上不能吃饭呢？',
+    '',
+    '这是你的家，',
+    '你说了算。',
+    '',
+    '所谓的"归属"，',
+    '不过是一道选择题。',
+    '',
+    '你不属于任何地方，',
+    '所以你属于所有地方。',
+  ];
+
+  function showWinScreen() {
+    overlay.classList.add('active');
+    btnEaster.style.display = 'inline-block';
+    btnReplay.style.display = 'inline-block';
+    btnEaster.textContent = '...';
+    easterTxt.classList.remove('show');
+    easterTxt.innerHTML = '';
+    qrcodeArea.classList.remove('show');
+    easterRevealed = false;
+
+    winMsg.innerHTML = '';
+    winMsg.classList.add('show');
+    winLinesShown = 0;
+
+    function showNextLine() {
+      if (winLinesShown < WIN_LINES.length) {
+        const line = WIN_LINES[winLinesShown];
+        const span = document.createElement('span');
+        span.className = 'line';
+        span.textContent = line || ' ';
+        winMsg.appendChild(span);
+        winLinesShown++;
+        winAnimTimer = setTimeout(showNextLine, line ? 500 : 300);
+      }
+    }
+    winAnimTimer = setTimeout(showNextLine, 400);
+  }
+
+  btnEaster.addEventListener('click', () => {
+    if (!gameComplete) return;
+    if (!easterRevealed) {
+      easterTxt.innerHTML = EASTER_LINES.map(l => `<span class="line">${l || '&nbsp;'}</span>`).join('');
+      easterTxt.classList.add('show');
+      qrcodeArea.classList.add('show');
+      btnEaster.textContent = '打乱一切';
+      easterRevealed = true;
+    } else {
+      // Reshuffle all items randomly
+      const allRooms = ROOM_KEYS;
+      items.forEach(it => {
+        it.currentRoom = allRooms[Math.floor(Math.random() * allRooms.length)];
+      });
+      ROOM_KEYS.forEach(rk => positionItemsInRoom(rk));
+      gameComplete = false;
+      easterRevealed = false;
+      winLinesShown = 0;
+      feedbacks = [];
+      heldItem = null;
+      hoveredItem = null;
+      currentRoom = 'kitchen';
+      overlay.classList.remove('active');
+      winMsg.classList.remove('show');
+      winMsg.innerHTML = '';
+      easterTxt.classList.remove('show');
+      easterTxt.innerHTML = '';
+      qrcodeArea.classList.remove('show');
+      btnEaster.textContent = '...';
+      if (winAnimTimer) { clearTimeout(winAnimTimer); winAnimTimer = null; }
+      requestAnimationFrame(render);
+      sfxPickup();
+    }
+  });
+
+  btnReplay.addEventListener('click', () => {
+    initGame();
+    requestAnimationFrame(render);
+  });
+
+  // ─────────────────── EVENT LISTENERS ───────────────────
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mousemove', onMove);
+  canvas.addEventListener('mouseup', onUp);
+  canvas.addEventListener('contextmenu', onContextMenu);
+  canvas.addEventListener('touchstart', onDown, { passive: false });
+  canvas.addEventListener('touchmove', onMove, { passive: false });
+  canvas.addEventListener('touchend', onUp);
+  window.addEventListener('keydown', onKeyDown);
+
+  // ────── 收款码：把 qrcode.jpg 放到和这个 HTML 同目录，或替换下面这行为 base64 ──────
+  qrcodeImg.src = 'qrcode.jpg';
+
+  // ─────────────────── INIT ───────────────────
+  initGame();
+  requestAnimationFrame(render);
+  console.log('🏠 归属 - Belonging');
+  console.log('点击物品拾起 → 点击顶部标签切换房间 → 点击地板放下');
+  console.log('右键或按 Esc 取消手持');
+})();
+</script>
+</body>
+</html>
