@@ -21,10 +21,8 @@
   }
   #game-container {
     position: relative;
-    width: 100vw;
-    height: 100vh;
-    max-width: 1200px;
-    max-height: 800px;
+    width: min(100vw, calc(100vh * 1200 / 780));
+    height: min(100vh, calc(100vw * 780 / 1200));
   }
   canvas {
     display: block;
@@ -144,12 +142,12 @@
 (function() {
   // ─────────────────── CONSTANTS ───────────────────
   const W = 1200, H = 780;
-  const UI_H = 58;
+  const UI_H = 62;
   const ROOM_X = 4, ROOM_Y = UI_H + 4;
   const ROOM_W = W - 8, ROOM_H = H - UI_H - 8;
   const WALL = 8;
   const SPRITE_BASE = 16;
-  const SPRITE_SCALE = 3;
+  const SPRITE_SCALE = 4;
   const SPRITE_S = SPRITE_BASE * SPRITE_SCALE;
 
   // ─────────────────── DOM ───────────────────
@@ -558,8 +556,8 @@
     const roomItems = items.filter(it => it.currentRoom === roomKey && it !== heldItem);
     if (roomItems.length === 0) return;
     const padding = 20;
-    const itemW = SPRITE_S + 28;
-    const itemH = SPRITE_S + 30;
+    const itemW = SPRITE_S + 36;
+    const itemH = SPRITE_S + 38;
     const cols = Math.max(1, Math.floor((ROOM_W - padding * 2 - WALL * 2) / itemW));
     const cellW = (ROOM_W - padding * 2 - WALL * 2) / cols;
     const roomLeft = ROOM_X + WALL + padding;
@@ -606,15 +604,15 @@
 
       // Room name
       ctx.fillStyle = isActive ? '#f0e6d3' : '#999';
-      ctx.font = '12px "Press Start 2P", "Microsoft YaHei", sans-serif';
+      ctx.font = '16px "Press Start 2P", "Microsoft YaHei", sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(info.name, tx + (tabW - 2) / 2, tabY + 24);
+      ctx.fillText(info.name, tx + (tabW - 2) / 2, tabY + 26);
       ctx.textAlign = 'start';
 
       // Item count badge
       const count = items.filter(it => it.currentRoom === rk).length;
       ctx.fillStyle = '#555';
-      ctx.font = '7px "Press Start 2P", "Microsoft YaHei", sans-serif';
+      ctx.font = '10px "Press Start 2P", "Microsoft YaHei", sans-serif';
       ctx.fillText(count + '件', tx + (tabW - 2) / 2, tabY + 40);
     });
   }
@@ -662,7 +660,7 @@
 
     // Room label (subtle, bottom-right)
     ctx.fillStyle = 'rgba(0,0,0,0.1)';
-    ctx.font = 'bold 24px "Press Start 2P", "Microsoft YaHei", sans-serif';
+    ctx.font = 'bold 30px "Press Start 2P", "Microsoft YaHei", sans-serif';
     ctx.textAlign = 'right';
     ctx.fillText(info.name, ix + iw - WALL - 16, iy + ih - WALL - 16);
     ctx.textAlign = 'start';
@@ -681,9 +679,9 @@
 
     // Label
     ctx.fillStyle = '#333';
-    ctx.font = '9px "Press Start 2P", "Microsoft YaHei", sans-serif';
+    ctx.font = '12px "Press Start 2P", "Microsoft YaHei", sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(it.name, x + SPRITE_S / 2, y + SPRITE_S + 14);
+    ctx.fillText(it.name, x + SPRITE_S / 2, y + SPRITE_S + 16);
     ctx.textAlign = 'start';
 
     ctx.restore();
@@ -736,9 +734,9 @@
 
       // "Carrying" label
       ctx.fillStyle = '#f1c40f';
-      ctx.font = '8px "Press Start 2P", "Microsoft YaHei", sans-serif';
+      ctx.font = '11px "Press Start 2P", "Microsoft YaHei", sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('手持: ' + heldItem.name, mouseX, hy - 12);
+      ctx.fillText('手持: ' + heldItem.name, mouseX, hy - 14);
       ctx.textAlign = 'start';
     }
 
@@ -751,9 +749,9 @@
 
     // Title text
     ctx.fillStyle = '#f0e6d3';
-    ctx.font = '14px "Press Start 2P", "Microsoft YaHei", sans-serif';
+    ctx.font = '17px "Press Start 2P", "Microsoft YaHei", sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText('🏠 我属于哪里', 14, UI_H - 18);
+    ctx.fillText('🏠 我属于哪里', 14, UI_H - 16);
     ctx.textAlign = 'start';
 
     // Progress indicator (bottom-left corner)
@@ -786,9 +784,9 @@
     }
     // Count text (left of bar)
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 10px "Press Start 2P", "Microsoft YaHei", sans-serif';
+    ctx.font = 'bold 13px "Press Start 2P", "Microsoft YaHei", sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(`已归位 ${correct} / ${total}`, barX, barY - 6);
+    ctx.fillText(`已归位 ${correct} / ${total}`, barX, barY - 7);
     ctx.textAlign = 'start';
 
     // Music toggle (bottom-right)
@@ -799,7 +797,7 @@
     ctx.lineWidth = 2;
     ctx.strokeRect(musicX - 2, musicY - 2, 24, 24);
     ctx.fillStyle = musicOn ? '#f1c40f' : '#666';
-    ctx.font = '13px sans-serif';
+    ctx.font = '16px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(musicOn ? '♫' : '♪', musicX + 10, musicY + 16);
     ctx.textAlign = 'start';
